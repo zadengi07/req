@@ -60,6 +60,33 @@ bot.onText(/\/start/, (msg) => {
     });
 });
 
+// --- POST YARATISH QISMI ---
+
+bot.onText(/\/post/, (msg) => {
+    const chatId = msg.chat.id;
+    if (chatId !== adminId) return;
+
+    bot.sendMessage(chatId, "Post matnini yoki rasm/videoni yuboring. Men uni saqlab olaman va keyin qanday yuborishni so'rayman.");
+
+    // Bir martalik listener: admin xabar yuborishini kutadi
+    bot.once('message', (postMsg) => {
+        if (postMsg.text === '/post' || postMsg.chat.id !== adminId) return;
+
+        const opts = {
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: "Uzatish (Forward)", callback_data: `send_fwd_${postMsg.message_id}` },
+                        { text: "Bot nomidan", callback_data: `send_bot_${postMsg.message_id}` }
+                    ],
+                    [{ text: "❌ Bekor qilish", callback_data: "cancel_post" }]
+                ]
+            }
+        };
+
+        bot.sendMessage(chatId, "Ushbu postni qanday usulda tarqatamiz?", opts);
+    });
+});
 bot.onText(/\/students/, (msg) => {
     const chatId = msg.chat.id;
     if (chatId !== adminId) return;
@@ -83,12 +110,13 @@ students.forEach((s) => {
         }
     });
 });
-
-bot.on('callback_query', (query) => {
+bot.on('callback_query', async (query) => {
     const chatId = query.message.chat.id;
-    
-    if (query.data === "remove_student") {
-        bot.sendMessage(chatId, "Ochirish kerak bolgan talabaning ID raqamini yozing:");
+    const data = query.data; // <--- Bu yerda 'data'ni aniqlab olish shart
+
+    // 1. Talabani o'chirish logikasi
+    if (data === "remove_student") {
+        bot.sendMessage(chatId, "O'chirish kerak bo'lgan talabaning ID raqamini yozing:");
         
         const idListener = (msg) => {
             if (msg.chat.id === adminId && !msg.text.startsWith('/')) {
@@ -100,7 +128,7 @@ bot.on('callback_query', (query) => {
 
                 if (students.length < initialCount) {
                     saveStudents(students);
-                    bot.sendMessage(chatId, "ID: " + targetId + " ochirildi.");
+                    bot.sendMessage(chatId, `ID: ${targetId} o'chirildi.`);
                 } else {
                     bot.sendMessage(chatId, "Bunday ID topilmadi.");
                 }
@@ -109,8 +137,43 @@ bot.on('callback_query', (query) => {
         };
         bot.on('message', idListener);
     }
-});
 
+    // 2. Post yuborish logikasi
+    if (data.startsWith('send_fwd_') || data.startsWith('send_bot_')) {
+        const action = data.split('_')[1]; // fwd yoki bot
+        const messageId = data.split('_')[2];
+        const students = loadStudents();
+        let count = 0;
+
+        // Adminni o'ziga yuborishni kutish xabari
+        const statusMsg = await bot.sendMessage(chatId, "Yuborish boshlandi...");
+
+        for (const student of students) {
+            try {
+                // MUHIM: student.id bazada Telegram chatId bo'lishi kerak!
+                if (action === 'fwd') {
+                    await bot.forwardMessage(student.id, adminId, messageId);
+                } else {
+                    await bot.copyMessage(student.id, adminId, messageId);
+                }
+                count++;
+            } catch (err) {
+                console.log(`${student.id} ga yuborib bo'lmadi (Botni bloklagan bo'lishi mumkin).`);
+            }
+        }
+
+        bot.editMessageText(`Tayyor! Xabar ${count} ta foydalanuvchiga muvaffaqiyatli yuborildi.`, {
+            chat_id: chatId,
+            message_id: statusMsg.message_id
+        });
+    }
+
+    // 3. Bekor qilish
+    if (data === "cancel_post") {
+        bot.deleteMessage(chatId, query.message.message_id);
+        bot.sendMessage(chatId, "Post yuborish bekor qilindi.");
+    }
+});
 // --- API ENDPOINT ---
 
 app.post('/add-student', async (req, res) => {
