@@ -9,14 +9,17 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// --- SOZLAMALAR ---
 const token = process.env.BOT_TOKEN;
 const adminId = Number(process.env.ADMIN_ID);
 const bot = new TelegramBot(token, { polling: true });
 
+const STUDENTS_FILE = path.join(__dirname, 'data.json');
+const USERS_FILE = path.join(__dirname, 'users.json');
+
 // Ma'lumotlarni yuklash funksiyasi
-const loadStudents = () => {
+const loadData = (filePath) => {
     try {
-        const filePath = path.join(__dirname, 'data.json');
         if (!fs.existsSync(filePath)) return [];
         const data = fs.readFileSync(filePath, 'utf8');
         return JSON.parse(data);
@@ -26,49 +29,66 @@ const loadStudents = () => {
 };
 
 // Ma'lumotlarni saqlash funksiyasi
-const saveStudents = (students) => {
-    fs.writeFileSync(path.join(__dirname, 'data.json'), JSON.stringify(students, null, 2));
+const saveData = (filePath, data) => {
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
 };
 
-// --- SERVER YO'LLARI (Ping va Status) ---
+// --- SERVER YO'LLARI ---
+app.get('/', (req, res) => res.send('Server Online'));
+app.get('/ping', (req, res) => res.status(200).json({ status: "success", message: "pong" }));
 
-app.get('/', (req, res) => {
-    res.send('Server ishlamoqda. Status: Online');
-});
+// --- BOT KOMANDALARI ---
 
-app.get('/ping', (req, res) => {
-    res.status(200).json({ status: "success", message: "pong" });
-});
-
-// --- BOT BUYRUQLARI ---
-
+// 1. START - Har qanday start bosgan odamni users.json ga qo'shish
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
     const firstName = msg.from.first_name;
+
+    let users = loadData(USERS_FILE);
+    if (!users.includes(chatId)) {
+        users.push(chatId);
+        saveData(USERS_FILE, users);
+    }
 
     const inline_keyboard = [
         [{ text: 'DevCore (Ariza topshirish)', web_app: { url: 'https://front-end-kursi.netlify.app/' } }],
         [{ text: '💬 Admin bilan boglanish', url: 'https://t.me/bro_xvv' }]
     ];
 
-    let welcomeText = "Assalomu alaykum, " + firstName + "!\n\n" +
-                      "Dasturlash kurslariga ariza topshirish uchun quyidagi tugmani bosing.";
-
-    bot.sendMessage(chatId, welcomeText, {
+    bot.sendMessage(chatId, `Assalomu alaykum, ${firstName}!\nDasturlash kurslariga ariza topshirish uchun quyidagi tugmani bosing.`, {
         parse_mode: 'HTML',
         reply_markup: { inline_keyboard }
     });
 });
 
-// --- POST YARATISH QISMI ---
+// 2. STUDENTS - Faqat admin uchun
+bot.onText(/\/students/, (msg) => {
+    const chatId = msg.chat.id;
+    if (chatId !== adminId) return;
 
+    const students = loadData(STUDENTS_FILE);
+    if (students.length === 0) return bot.sendMessage(chatId, "Ro'yxat bo'sh.");
+
+    let message = "<b>Talabalar ro'yxati:</b>\n\n";
+    students.forEach((s) => {
+        message += `ID: ${s.id}\nIsm: ${s.name}\nGuruh: ${s.group}\nTel: ${s.phone}\nKontakt: ${s.contact}\n\n`;
+    });
+
+    bot.sendMessage(chatId, message, {
+        parse_mode: 'HTML',
+        reply_markup: {
+            inline_keyboard: [[{ text: "Talabani o'chirish", callback_data: "remove_student" }]]
+        }
+    });
+});
+
+// 3. POST - Admin xabar yuborishi
 bot.onText(/\/post/, (msg) => {
     const chatId = msg.chat.id;
     if (chatId !== adminId) return;
 
-    bot.sendMessage(chatId, "Post matnini yoki rasm/videoni yuboring. Men uni saqlab olaman va keyin qanday yuborishni so'rayman.");
+    bot.sendMessage(chatId, "Barcha foydalanuvchilarga yubormoqchi bo'lgan xabaringizni yuboring (rasm, matn, video):");
 
-    // Bir martalik listener: admin xabar yuborishini kutadi
     bot.once('message', (postMsg) => {
         if (postMsg.text === '/post' || postMsg.chat.id !== adminId) return;
 
@@ -87,47 +107,23 @@ bot.onText(/\/post/, (msg) => {
         bot.sendMessage(chatId, "Ushbu postni qanday usulda tarqatamiz?", opts);
     });
 });
-bot.onText(/\/students/, (msg) => {
-    const chatId = msg.chat.id;
-    if (chatId !== adminId) return;
 
-    const students = loadStudents();
-    if (students.length === 0) return bot.sendMessage(chatId, "Royxat bosh.");
-
- let message = "Talabalar royxati:\n\n";
-students.forEach((s) => {
-    message += "ID: " + s.id + "\n" +
-               "Ism: " + s.name + "\n" +
-               "Guruh: " + s.group + "\n" +
-               "Tel: " + s.phone + "\n" +
-               "Kontakt: " + s.contact + "\n\n"; // Har bir talabadan keyin 2 ta bo'sh joy
-});
-
-    bot.sendMessage(chatId, message, {
-        parse_mode: 'HTML',
-        reply_markup: {
-            inline_keyboard: [[{ text: "Talabani ochirish", callback_data: "remove_student" }]]
-        }
-    });
-});
+// --- CALLBACK QUERY ---
 bot.on('callback_query', async (query) => {
     const chatId = query.message.chat.id;
-    const data = query.data; // <--- Bu yerda 'data'ni aniqlab olish shart
+    const data = query.data;
 
-    // 1. Talabani o'chirish logikasi
     if (data === "remove_student") {
         bot.sendMessage(chatId, "O'chirish kerak bo'lgan talabaning ID raqamini yozing:");
-        
         const idListener = (msg) => {
             if (msg.chat.id === adminId && !msg.text.startsWith('/')) {
                 const targetId = parseInt(msg.text);
-                let students = loadStudents();
+                let students = loadData(STUDENTS_FILE);
                 const initialCount = students.length;
-
                 students = students.filter(s => s.id !== targetId);
 
                 if (students.length < initialCount) {
-                    saveStudents(students);
+                    saveData(STUDENTS_FILE, students);
                     bot.sendMessage(chatId, `ID: ${targetId} o'chirildi.`);
                 } else {
                     bot.sendMessage(chatId, "Bunday ID topilmadi.");
@@ -138,47 +134,45 @@ bot.on('callback_query', async (query) => {
         bot.on('message', idListener);
     }
 
-    // 2. Post yuborish logikasi
+    // Hammaga yuborish logikasi
     if (data.startsWith('send_fwd_') || data.startsWith('send_bot_')) {
-        const action = data.split('_')[1]; // fwd yoki bot
+        const action = data.split('_')[1];
         const messageId = data.split('_')[2];
-        const students = loadStudents();
+        const allUsers = loadData(USERS_FILE); // Start bosgan hamma odamlar
         let count = 0;
 
-        // Adminni o'ziga yuborishni kutish xabari
-        const statusMsg = await bot.sendMessage(chatId, "Yuborish boshlandi...");
+        const statusMsg = await bot.sendMessage(chatId, `Yuborish boshlandi... (Jami: ${allUsers.length} foydalanuvchi)`);
 
-        for (const student of students) {
+        for (const userId of allUsers) {
             try {
-                // MUHIM: student.id bazada Telegram chatId bo'lishi kerak!
                 if (action === 'fwd') {
-                    await bot.forwardMessage(student.id, adminId, messageId);
+                    await bot.forwardMessage(userId, adminId, messageId);
                 } else {
-                    await bot.copyMessage(student.id, adminId, messageId);
+                    await bot.copyMessage(userId, adminId, messageId);
                 }
                 count++;
+                // Limitga tushmaslik uchun
+                await new Promise(res => setTimeout(res, 50));
             } catch (err) {
-                console.log(`${student.id} ga yuborib bo'lmadi (Botni bloklagan bo'lishi mumkin).`);
+                console.log(`${userId} botni bloklagan.`);
             }
         }
 
-        bot.editMessageText(`Tayyor! Xabar ${count} ta foydalanuvchiga muvaffaqiyatli yuborildi.`, {
+        bot.editMessageText(`Tayyor! Xabar ${count} ta foydalanuvchiga yuborildi.`, {
             chat_id: chatId,
             message_id: statusMsg.message_id
         });
     }
 
-    // 3. Bekor qilish
     if (data === "cancel_post") {
         bot.deleteMessage(chatId, query.message.message_id);
-        bot.sendMessage(chatId, "Post yuborish bekor qilindi.");
     }
 });
-// --- API ENDPOINT ---
 
+// --- API ENDPOINT ---
 app.post('/add-student', async (req, res) => {
     const { name, group, phone, contact, time } = req.body;
-    let students = loadStudents();
+    let students = loadData(STUDENTS_FILE);
 
     const lastId = students.length > 0 ? students[students.length - 1].id : 0;
     const newId = lastId + 1;
@@ -187,16 +181,8 @@ app.post('/add-student', async (req, res) => {
     students.push(newStudent);
 
     try {
-        saveStudents(students);
-
-        const adminMessage = "Yangi ariza:\n\n" +
-                             "ID: " + newId + "\n" +
-                             "Ism: " + name + "\n" +
-                             "Guruh: " + group + "\n" +
-                             "Tel: " + phone + "\n" +
-                             "Kontakt: " + contact + "\n" +
-                             "Vaqt: " + time;
-
+        saveData(STUDENTS_FILE, students);
+        const adminMessage = `Yangi ariza:\n\nID: ${newId}\nIsm: ${name}\nGuruh: ${group}\nTel: ${phone}\nKontakt: ${contact}\nVaqt: ${time}`;
         await bot.sendMessage(adminId, adminMessage);
         res.status(200).send({ message: "Saqlandi", id: newId });
     } catch (error) {
