@@ -115,7 +115,7 @@ bot.onText(/\/students/, (msg) => {
 
 // --- API ENDPOINT ---
 
-app.post('/add-student', (req, res) => {
+app.post('/add-student', async (req, res) => { // async qo'shildi
     const { name, group, phone, contact, time } = req.body;
     const newStudent = { name, group, phone, contact, time };
     const students = loadStudents();
@@ -124,21 +124,25 @@ app.post('/add-student', (req, res) => {
     try {
         fs.writeFileSync(path.join(__dirname, 'data.json'), JSON.stringify(students, null, 2));
 
-        const adminMessage = `<b>Yangi ariza!</b>\n\n` +
+        const adminMessage = `<b>DevCore jamoasiga yangi ariza kelib tushdi!</b>\n\n` +
                              `<b>Ism:</b> ${name}\n` +
                              `<b>Guruh:</b> ${group}\n` +
                              `<b>Tel:</b> ${phone}\n` +
-                             `<b>Boglanish:</b> ${contact}\n` +
+                             `<b>Bog'lanish:</b> ${contact}\n` +
                              `<b>Vaqt:</b> ${time}`;
 
-        bot.sendMessage(adminId, adminMessage, { parse_mode: 'HTML' });
+        // Xabar yuborishni await bilan tekshiramiz
+        await bot.sendMessage(adminId, adminMessage, { parse_mode: 'HTML' });
+        console.log(`✅ Adminga xabar yuborildi: ${adminId}`);
+        
         res.status(200).send({ message: "Muvaffaqiyatli saqlandi" });
     } catch (error) {
-        res.status(500).send({ message: "Serverda xatolik" });
+        console.error("❌ Xatolik yuz berdi:", error.message); // Xatoni konsolda ko'rish uchun
+        res.status(500).send({ message: "Serverda xatolik yoki Bot xatosi" });
     }
 });
-
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`🚀 Server ${PORT}-portda yugurmoqda...`);
+
 });
