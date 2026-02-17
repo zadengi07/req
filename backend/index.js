@@ -1,10 +1,10 @@
-// require('dotenv').config();
-// const TelegramBot = require('node-telegram-bot-api');
-// const fs = require('fs');
-// const path = require('path');
-// const express = require('express');
-// const cors = require('cors');
-// const app = express();
+require('dotenv').config();
+const TelegramBot = require('node-telegram-bot-api');
+const fs = require('fs');
+const path = require('path');
+const express = require('express');
+const cors = require('cors');
+const app = express();
 
 app.use(cors());
 app.use(express.json());
@@ -190,6 +190,6 @@ app.post('/add-student', async (req, res) => {
     }
 });
 
-// const PORT = process.env.PORT || 3000;
-// app.listen(PORT, () => console.log("Server ishlamoqda..."));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log("Server ishlamoqda..."));
 
